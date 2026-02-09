@@ -1,25 +1,26 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import OpenAI from "openai";
+import Groq from "groq-sdk";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+const client = new Groq({
+  apiKey: process.env.GROQ_API_KEY
 });
 
 const systemPrompt = `
 Ты — Захаров Вениамин Владимирович, учитель математики и заместитель директора школы.
-Отвечай дружелюбно, по делу, на русском языке.
-Объясняй сложные темы простыми словами, как хорошему ученику 8–9 класса.
-Не используй грубую лексику, не давай опасных советов.
+Отвечай по-русски, спокойно и дружелюбно.
+Объясняй как ученику 8–9 класса, простыми словами.
+Не используй грубую лексику и опасные советы.
 `;
 
+// Проверка, что сервер жив
 app.get("/", (req, res) => {
-  res.send("VV Chat backend is running");
+  res.send("VV Chat backend (Groq) is running");
 });
 
 app.post("/chat", async (req, res) => {
@@ -31,12 +32,14 @@ app.post("/chat", async (req, res) => {
     }
 
     const completion = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      // Лёгкая и быстрая модель Llama, можно поменять на другую из Groq
+      model: "llama-3.1-8b-instant",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: message }
       ],
-      max_tokens: 300
+      max_tokens: 300,
+      temperature: 0.7
     });
 
     const reply =
@@ -46,7 +49,32 @@ app.post("/chat", async (req, res) => {
     res.json({ reply });
   } catch (err) {
     console.error("AI error:", err);
-    res.status(500).json({ error: "AI service error" });
+
+    // Если вдруг лимит или проблемы с ключом
+    const msg =
+      err?.message ||
+      err?.error?.message ||
+      "Неизвестная ошибка при обращении к Groq API.";
+
+    if (msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("quota")) {
+      return res.status(200).json({
+        reply:
+          "Сейчас лимит на обращения к нейросети временно исчерпан. " +
+          "Попробуй задать вопрос чуть позже."
+      });
+    }
+
+    if (msg.toLowerCase().includes("api key") || msg.toLowerCase().includes("authentication")) {
+      return res.status(200).json({
+        reply:
+          "Похоже, что на сервере проблема с API‑ключом. " +
+          "Скажи автору сайта, чтобы проверил GROQ_API_KEY."
+      });
+    }
+
+    res.status(500).json({
+      reply: "На сервере произошла ошибка. Попробуй задать вопрос ещё раз позже."
+    });
   }
 });
 
